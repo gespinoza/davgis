@@ -243,6 +243,37 @@ def Resample(input_tiff, output_tiff, cellsize, method=None,
     return output_tiff
 
 
+def Array_to_Raster(array, output_tiff, ll_corner, cellsize,
+                    epsg=4326, gdal_datatype=7):
+    # Spatial Reference
+    srs = Spatial_Reference(epsg)
+
+    # Output
+    out_driver = gdal.GetDriverByName('GTiff')
+    if os.path.exists(output_tiff):
+        out_driver.Delete(output_tiff)
+    y_ncells, x_ncells = array.shape
+
+    out_source = out_driver.Create(output_tiff, x_ncells, y_ncells,
+                                   1, gdal_datatype)
+    out_band = out_source.GetRasterBand(1)
+    out_band.SetNoDataValue(-9999)
+
+    out_top_left_x = ll_corner[0]
+    out_top_left_y = ll_corner[1] + cellsize*y_ncells
+
+    out_source.SetGeoTransform((out_top_left_x, cellsize, 0,
+                                out_top_left_y, 0, -cellsize))
+    out_source.SetProjection(srs)
+    out_band.WriteArray(array)
+
+    # Save and/or close the data sources
+    out_source = None
+
+    # Return
+    return output_tiff
+
+
 def Clip(input_tiff, output_tiff, bbox):
     # Input
     inp_lyr = gdal.Open(input_tiff)
