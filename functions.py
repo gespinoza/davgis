@@ -5,8 +5,6 @@ import osr
 import gdal
 import pandas as pd
 import math
-from scipy.spatial.distance import cdist
-from pyKriging.krige import kriging
 import warnings
 
 
@@ -431,7 +429,7 @@ def Add_Field(input_lyr, field_name, ogr_field_type):
 
 def Spatial_Reference(epsg, return_string=True):
     srs = osr.SpatialReference()
-    srs.ImportFromEPSG(4326)
+    srs.ImportFromEPSG(epsg)
     if return_string:
         return srs.ExportToWkt()
     else:
@@ -446,91 +444,89 @@ def List_Datasets(path, ext):
     return datsets_ls
 
 
-def Kriging_Interpolation(input_shp, field_name, output_tiff,
-                          cellsize=None, bbox=None):
+def get_neighbors(x, y, nx, ny, cells=1):
+    neighbors_ls = [(xi, yi)
+                    for xi in range(x - 1 - cells + 1, x + 2 + cells - 1)
+                    for yi in range(y - 1 - cells + 1, y + 2 + cells - 1)
+                    if (-1 < x <= nx - 1 and -1 < y <= ny - 1 and
+                        (x != xi or y != yi) and
+                        (0 <= xi <= nx - 1) and (0 <= yi <= ny - 1)
+                        )
+                    ]
+    return neighbors_ls
 
+
+def get_mean_neighbors(array, index, include_cell=False):
+    xi, yi = index
+    nx, ny = array.shape
+    stay = True
+    cells = 1
+    while stay:
+        neighbors_ls = get_neighbors(xi, yi, nx, ny, cells)
+        if include_cell:
+            neighbors_ls = neighbors_ls + [(xi, yi)]
+        values_ls = [array[i] for i in neighbors_ls]
+        if pd.np.isnan(values_ls).all():
+            cells += 1
+        else:
+            value = pd.np.nanmean(values_ls)
+            stay = False
+    return value
+
+
+def array_filter(array, number_of_passes=1):
+    while number_of_passes >= 1:
+        ny, nx = array.shape
+        arrayf = pd.np.empty(array.shape)
+        arrayf[:] = pd.np.nan
+        for j in range(ny):
+            for i in range(nx):
+                arrayf[j, i] = get_mean_neighbors(array, (j, i), True)
+        array[:] = arrayf[:]
+        number_of_passes -= 1
+    return arrayf
+
+
+def Apply_Filter(input_tiff, output_tiff, number_of_passes):
     # Input
-    inp_driver = ogr.GetDriverByName('ESRI Shapefile')
-    inp_source = inp_driver.Open(input_shp, 0)
-    inp_lyr = inp_source.GetLayer()
-    inp_srs = inp_lyr.GetSpatialRef()
-    inp_srs_wkt = inp_srs.ExportToWkt()
+    inp_lyr = gdal.Open(input_tiff)
+    inp_srs = inp_lyr.GetProjection()
+    inp_transform = inp_lyr.GetGeoTransform()
+    inp_band = inp_lyr.GetRasterBand(1)
+    inp_array = inp_band.ReadAsArray()
+    inp_data_type = inp_band.DataType
 
-    # Read features
-    xy_ls = []
-    z_ls = []
-    for i in range(inp_lyr.GetFeatureCount()):
-        feature_inp = inp_lyr.GetFeature(i)
-        xy_ls.append([j for j in feature_inp.geometry().GetPoint()[0:2]])
-        z_ls.append(feature_inp.GetField(field_name))
+    top_left_x = inp_transform[0]
+    cellsize_x = inp_transform[1]
+    rot_1 = inp_transform[2]
+    top_left_y = inp_transform[3]
+    rot_2 = inp_transform[4]
+    cellsize_y = inp_transform[5]
+    NoData_value = inp_band.GetNoDataValue()
 
-    # Numpy arrays
-    xy_ls = pd.np.array(xy_ls)
-    z_ls = pd.np.array(z_ls)
-    x_min = xy_ls[:, 0].min()
-    y_min = xy_ls[:, 1].min()
-    x_max = xy_ls[:, 0].max()
-    y_max = xy_ls[:, 1].max()
-    x_diff = x_max - x_min
-    y_diff = y_max - y_min
-    if x_diff >= y_diff:
-        axis = 0
-    else:
-        axis = 1
-    deno_diff = max(x_diff, y_diff)
+    x_ncells = inp_lyr.RasterXSize
+    y_ncells = inp_lyr.RasterYSize
 
-    # Cellsize
-    if not cellsize:
-        points_dist = cdist(xy_ls, xy_ls, 'euclidean')
-        pd.np.fill_diagonal(points_dist, pd.np.nan)
-        cellsize = pd.np.nanmean(points_dist)/50.0
-    if not bbox:
-        bbox_ext = inp_lyr.GetExtent()
-        bbox = [bbox_ext[0], bbox_ext[2], bbox_ext[1], bbox_ext[3]]
+    # Filter
+    inp_array[inp_array == NoData_value] = pd.np.nan
+    out_array = array_filter(inp_array, number_of_passes)
 
-    # Transformation
-    xy_tr = pd.np.empty(xy_ls.shape)
-    xy_tr[:, 0] = (xy_ls[:, 0] - x_min) / deno_diff
-    xy_tr[:, 1] = (xy_ls[:, 1] - y_min) / deno_diff
-
-    # Kriging
-    if len(z_ls) > 70:  # Adding 70 first instead of all together
-        k_out = kriging(xy_tr[0:70], z_ls[0:70])
-        for pp in range(70, len(z_ls)):
-            k_out.addPoint(xy_tr[pp], z_ls[pp])
-    else:
-        k_out = kriging(xy_tr, z_ls)
-
-    k_out.train()
-
-    # k_out.plot()
-
-    # Create array
-    array_y = pd.np.arange(bbox[1] + cellsize/2.0,
-                           bbox[3] + cellsize/2.0,
-                           cellsize)
-    array_y_n = len(array_y)
-    array_x = pd.np.arange(bbox[0] + cellsize/2.0,
-                           bbox[2] + cellsize/2.0,
-                           cellsize)
-    array_x_n = len(array_x)
-
-    array = pd.np.empty([len(array_y), len(array_x)],
-                        dtype=float)
-    array[:] = pd.np.nan
-
-    # Store values
-    for i in range(array_x_n):
-        for j in range(array_y_n):
-            jx = array_y_n - j - 1
-            array[jx, i] = k_out.predict([(array_x[i] - x_min) / deno_diff,
-                                          (array_y[j] - y_min) / deno_diff])
-
-    # save output raster
-    Array_to_Raster(array, output_tiff, bbox[0:2], cellsize, inp_srs_wkt, 7)
+    # Output
+    out_driver = gdal.GetDriverByName('GTiff')
+    if os.path.exists(output_tiff):
+        out_driver.Delete(output_tiff)
+    out_source = out_driver.Create(output_tiff, x_ncells, y_ncells,
+                                   1, inp_data_type)
+    out_band = out_source.GetRasterBand(1)
+    out_band.SetNoDataValue(NoData_value)
+    out_source.SetGeoTransform((top_left_x, cellsize_x, rot_1,
+                                top_left_y, rot_2, cellsize_y))
+    out_source.SetProjection(inp_srs)
+    out_band.WriteArray(out_array)
 
     # Save and/or close the data sources
-    inp_source = None
+    inp_lyr = None
+    out_source = None
 
     # Return
     return output_tiff
