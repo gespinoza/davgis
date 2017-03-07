@@ -125,13 +125,13 @@ def Raster_to_Array(input_tiff, ll_corner, x_ncells, y_ncells,
     # Input
     give_warning = False
     inp_lyr = gdal.Open(input_tiff)
-    transform = inp_lyr.GetGeoTransform()
+    inp_transform = inp_lyr.GetGeoTransform()
     inp_band = inp_lyr.GetRasterBand(1)
 
-    top_left_x = transform[0]
-    cellsize_x = transform[1]
-    top_left_y = transform[3]
-    cellsize_y = transform[5]
+    top_left_x = inp_transform[0]
+    cellsize_x = inp_transform[1]
+    top_left_y = inp_transform[3]
+    cellsize_y = inp_transform[5]
     NoData_value = inp_band.GetNoDataValue()
 
     x_tot_n = inp_lyr.RasterXSize
@@ -523,6 +523,40 @@ def Apply_Filter(input_tiff, output_tiff, number_of_passes):
                                 top_left_y, rot_2, cellsize_y))
     out_source.SetProjection(inp_srs)
     out_band.WriteArray(out_array)
+
+    # Save and/or close the data sources
+    inp_lyr = None
+    out_source = None
+
+    # Return
+    return output_tiff
+
+
+def Extract_Band(input_tiff, output_tiff, band_number=1):
+    # Input
+    inp_lyr = gdal.Open(input_tiff)
+    inp_srs = inp_lyr.GetProjection()
+    inp_transform = inp_lyr.GetGeoTransform()
+    inp_band = inp_lyr.GetRasterBand(band_number)
+    inp_array = inp_band.ReadAsArray()
+    inp_data_type = inp_band.DataType
+
+    NoData_value = inp_band.GetNoDataValue()
+
+    x_ncells = inp_lyr.RasterXSize
+    y_ncells = inp_lyr.RasterYSize
+
+    # Output
+    out_driver = gdal.GetDriverByName('GTiff')
+    if os.path.exists(output_tiff):
+        out_driver.Delete(output_tiff)
+    out_source = out_driver.Create(output_tiff, x_ncells, y_ncells,
+                                   1, inp_data_type)
+    out_band = out_source.GetRasterBand(1)
+    out_band.SetNoDataValue(NoData_value)
+    out_source.SetGeoTransform(inp_transform)
+    out_source.SetProjection(inp_srs)
+    out_band.WriteArray(inp_array)
 
     # Save and/or close the data sources
     inp_lyr = None
