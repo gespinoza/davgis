@@ -447,18 +447,6 @@ def List_Datasets(path, ext):
     return datsets_ls
 
 
-def get_neighbors(x, y, nx, ny, cells=1):
-    neighbors_ls = [(xi, yi)
-                    for xi in range(x - 1 - cells + 1, x + 2 + cells - 1)
-                    for yi in range(y - 1 - cells + 1, y + 2 + cells - 1)
-                    if (-1 < x <= nx - 1 and -1 < y <= ny - 1 and
-                        (x != xi or y != yi) and
-                        (0 <= xi <= nx - 1) and (0 <= yi <= ny - 1)
-                        )
-                    ]
-    return neighbors_ls
-
-
 def NetCDF_to_Raster(input_nc, output_tiff, ras_variable,
                      x_variable='longitude', y_variable='latitude',
                      crs={'variable': 'crs', 'wkt': 'crs_wkt'}, time=None):
@@ -538,37 +526,6 @@ def NetCDF_to_Raster(input_nc, output_tiff, ras_variable,
 
     # Return
     return output_tiff
-
-
-def get_mean_neighbors(array, index, include_cell=False):
-    xi, yi = index
-    nx, ny = array.shape
-    stay = True
-    cells = 1
-    while stay:
-        neighbors_ls = get_neighbors(xi, yi, nx, ny, cells)
-        if include_cell:
-            neighbors_ls = neighbors_ls + [(xi, yi)]
-        values_ls = [array[i] for i in neighbors_ls]
-        if pd.np.isnan(values_ls).all():
-            cells += 1
-        else:
-            value = pd.np.nanmean(values_ls)
-            stay = False
-    return value
-
-
-def array_filter(array, number_of_passes=1):
-    while number_of_passes >= 1:
-        ny, nx = array.shape
-        arrayf = pd.np.empty(array.shape)
-        arrayf[:] = pd.np.nan
-        for j in range(ny):
-            for i in range(nx):
-                arrayf[j, i] = get_mean_neighbors(array, (j, i), True)
-        array[:] = arrayf[:]
-        number_of_passes -= 1
-    return arrayf
 
 
 def Apply_Filter(input_tiff, output_tiff, number_of_passes):
@@ -703,6 +660,49 @@ def Interpolation(input_shp, field_name, output_tiff,
 
     # Return
     return output_tiff
+
+
+def get_neighbors(x, y, nx, ny, cells=1):
+    neighbors_ls = [(xi, yi)
+                    for xi in range(x - 1 - cells + 1, x + 2 + cells - 1)
+                    for yi in range(y - 1 - cells + 1, y + 2 + cells - 1)
+                    if (-1 < x <= nx - 1 and -1 < y <= ny - 1 and
+                        (x != xi or y != yi) and
+                        (0 <= xi <= nx - 1) and (0 <= yi <= ny - 1)
+                        )
+                    ]
+    return neighbors_ls
+
+
+def get_mean_neighbors(array, index, include_cell=False):
+    xi, yi = index
+    nx, ny = array.shape
+    stay = True
+    cells = 1
+    while stay:
+        neighbors_ls = get_neighbors(xi, yi, nx, ny, cells)
+        if include_cell:
+            neighbors_ls = neighbors_ls + [(xi, yi)]
+        values_ls = [array[i] for i in neighbors_ls]
+        if pd.np.isnan(values_ls).all():
+            cells += 1
+        else:
+            value = pd.np.nanmean(values_ls)
+            stay = False
+    return value
+
+
+def array_filter(array, number_of_passes=1):
+    while number_of_passes >= 1:
+        ny, nx = array.shape
+        arrayf = pd.np.empty(array.shape)
+        arrayf[:] = pd.np.nan
+        for j in range(ny):
+            for i in range(nx):
+                arrayf[j, i] = get_mean_neighbors(array, (j, i), True)
+        array[:] = arrayf[:]
+        number_of_passes -= 1
+    return arrayf
 
 
 def ogrtype_from_dtype(d_type):

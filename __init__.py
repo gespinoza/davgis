@@ -14,6 +14,8 @@ GIS workflows used in water resources.
 from .functions import *
 
 __all__ = ['Buffer', 'Feature_to_Raster', 'List_Fields', 'Raster_to_Array',
-           'Clip', 'Resample', 'Spatial_Reference', 'List_Datasets', 'Extract_Band']
+           'Resample', 'Array_to_Raster', 'Clip', 'Raster_to_Points',
+           'Add_Field', 'Spatial_Reference', 'List_Datasets',
+           'NetCDF_to_Raster', 'Apply_Filter', 'Extract_Band', 'Interpolation']
 
 __version__ = '0.1'
