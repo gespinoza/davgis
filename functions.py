@@ -4,8 +4,10 @@ import ogr
 import osr
 import gdal
 import pandas as pd
+import netCDF4
 import math
 import warnings
+from scipy.interpolate import griddata
 
 
 def Buffer(input_shp, output_shp, distance):
@@ -250,12 +252,13 @@ def Resample(input_tiff, output_tiff, cellsize, method=None,
 
 
 def Array_to_Raster(array, output_tiff, ll_corner, cellsize,
-                    srs_wkt, gdal_datatype=7):
+                    srs_wkt):
     # Output
     out_driver = gdal.GetDriverByName('GTiff')
     if os.path.exists(output_tiff):
         out_driver.Delete(output_tiff)
     y_ncells, x_ncells = array.shape
+    gdal_datatype = gdaltype_from_dtype(array.dtype)
 
     out_source = out_driver.Create(output_tiff, x_ncells, y_ncells,
                                    1, gdal_datatype)
@@ -456,6 +459,87 @@ def get_neighbors(x, y, nx, ny, cells=1):
     return neighbors_ls
 
 
+def NetCDF_to_Raster(input_nc, output_tiff, ras_variable,
+                     x_variable='longitude', y_variable='latitude',
+                     crs={'variable': 'crs', 'wkt': 'crs_wkt'}, time=None):
+    # Input
+    inp_nc = netCDF4.Dataset(input_nc, 'r')
+    inp_values = inp_nc.variables[ras_variable]
+    x_index = inp_values.dimensions.index(x_variable)
+    y_index = inp_values.dimensions.index(y_variable)
+
+    if not time:
+        inp_array = inp_values[:]
+    else:
+        time_variable = time['variable']
+        time_value = time['value']
+        t_index = inp_values.dimensions.index(time_variable)
+        time_index = list(inp_nc.variables[time_variable][:]).index(time_value)
+        if t_index == 0:
+            inp_array = inp_values[time_index, :, :]
+        elif t_index == 1:
+            inp_array = inp_values[:, time_index, :]
+        elif t_index == 2:
+            inp_array = inp_values[:, :, time_index]
+        else:
+            raise Exception("The array has more dimensions than expected")
+
+    # Transpose array if necessary
+    if y_index > x_index:
+        inp_array = pd.np.transpose(inp_array)
+
+    # Additional parameters
+    gdal_datatype = gdaltype_from_dtype(inp_array.dtype)
+    NoData_value = inp_nc.variables[ras_variable]._FillValue
+
+    if type(crs) == str:
+        srs_wkt = crs
+    else:
+        crs_variable = crs['variable']
+        crs_wkt = crs['wkt']
+        exec('srs_wkt = str(inp_nc.variables["{0}"].{1})'.format(crs_variable,
+                                                                 crs_wkt))
+
+    inp_x = inp_nc.variables[x_variable]
+    inp_y = inp_nc.variables[y_variable]
+
+    cellsize_x = abs(pd.np.mean([inp_x[i] - inp_x[i-1]
+                                 for i in range(1, len(inp_x))]))
+    cellsize_y = -abs(pd.np.mean([inp_y[i] - inp_y[i-1]
+                                  for i in range(1, len(inp_y))]))
+
+    # Output
+    out_driver = gdal.GetDriverByName('GTiff')
+    if os.path.exists(output_tiff):
+        out_driver.Delete(output_tiff)
+
+    y_ncells, x_ncells = inp_array.shape
+
+    out_source = out_driver.Create(output_tiff, x_ncells, y_ncells,
+                                   1, gdal_datatype)
+    out_band = out_source.GetRasterBand(1)
+    out_band.SetNoDataValue(pd.np.asscalar(NoData_value))
+
+    out_top_left_x = inp_x[0] - cellsize_x/2.0
+    if inp_y[-1] > inp_y[0]:
+        out_top_left_y = inp_y[-1] - cellsize_y/2.0
+        inp_array = pd.np.flipud(inp_array)
+    else:
+        out_top_left_y = inp_y[0] - cellsize_y/2.0
+
+    out_source.SetGeoTransform((out_top_left_x, cellsize_x, 0,
+                                out_top_left_y, 0, cellsize_y))
+    out_source.SetProjection(srs_wkt)
+    out_band.WriteArray(inp_array)
+
+    # Save and/or close the data sources
+    inp_nc.close()
+    out_source = None
+
+    # Return
+    return output_tiff
+
+
 def get_mean_neighbors(array, index, include_cell=False):
     xi, yi = index
     nx, ny = array.shape
@@ -566,6 +650,61 @@ def Extract_Band(input_tiff, output_tiff, band_number=1):
     return output_tiff
 
 
+def Interpolation(input_shp, field_name, output_tiff,
+                  method='nearest', cellsize=None):
+    '''
+    method = ('nearest', 'linear', 'cubic')
+    '''
+    # Input
+    inp_driver = ogr.GetDriverByName('ESRI Shapefile')
+    inp_source = inp_driver.Open(input_shp, 0)
+    inp_lyr = inp_source.GetLayer()
+    inp_srs = inp_lyr.GetSpatialRef()
+    inp_wkt = inp_srs.ExportToWkt()
+
+    # Extent
+    x_min, x_max, y_min, y_max = inp_lyr.GetExtent()
+    ll_corner = [x_min, y_min]
+    if not cellsize:
+        cellsize = min(x_max - x_min, y_max - y_min)/25.0
+    x_ncells = int((x_max - x_min) / cellsize)
+    y_ncells = int((y_max - y_min) / cellsize)
+
+    # Feature points
+    x = []
+    y = []
+    z = []
+    for i in range(inp_lyr.GetFeatureCount()):
+        feature_inp = inp_lyr.GetNextFeature()
+        point_inp = feature_inp.geometry().GetPoint()
+
+        x.append(point_inp[0])
+        y.append(point_inp[1])
+        z.append(feature_inp.GetField(field_name))
+
+    x = pd.np.array(x)
+    y = pd.np.array(y)
+    z = pd.np.array(z)
+
+    # Grid
+    X, Y = pd.np.meshgrid(pd.np.linspace(x_min + cellsize/2.0,
+                                         x_max - cellsize/2.0,
+                                         x_ncells),
+                          pd.np.linspace(y_min + cellsize/2.0,
+                                         y_max - cellsize/2.0,
+                                         y_ncells))
+
+    # Interpolate
+    array_out = griddata((x, y), z, (X, Y), method=method)
+    array_out = pd.np.flipud(array_out)
+
+    # Save raster
+    Array_to_Raster(array_out, output_tiff, ll_corner, cellsize, inp_wkt)
+
+    # Return
+    return output_tiff
+
+
 def ogrtype_from_dtype(d_type):
     # ogr field type
     if 'float' in d_type.name:
@@ -579,3 +718,34 @@ def ogrtype_from_dtype(d_type):
     else:
         raise Exception('"{0}" is not recognized'.format(d_type))
     return ogr_data_type
+
+
+def gdaltype_from_dtype(d_type):
+    # gdal field type
+    if 'int8' == d_type.name:
+        gdal_data_type = 1
+    elif 'uint16' == d_type.name:
+        gdal_data_type = 2
+    elif 'int16' == d_type.name:
+        gdal_data_type = 3
+    elif 'uint32' == d_type.name:
+        gdal_data_type = 4
+    elif 'int32' == d_type.name:
+        gdal_data_type = 5
+    elif 'float32' == d_type.name:
+        gdal_data_type = 6
+    elif 'float64' == d_type.name:
+        gdal_data_type = 7
+    elif 'bool' in d_type.name:
+        gdal_data_type = 1
+    elif 'int' in d_type.name:
+        gdal_data_type = 5
+    elif 'float' in d_type.name:
+        gdal_data_type = 7
+    elif 'complex' == d_type.name:
+        gdal_data_type = 11
+    else:
+        warnings.warn('"{0}" is not recognized. '
+                      '"Unknown" data type used'.format(d_type))
+        gdal_data_type = 0
+    return gdal_data_type
