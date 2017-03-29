@@ -519,6 +519,7 @@ def NetCDF_to_Raster(input_nc, output_tiff, ras_variable,
                                 out_top_left_y, 0, cellsize_y))
     out_source.SetProjection(srs_wkt)
     out_band.WriteArray(inp_array)
+    out_band.ComputeStatistics(True)
 
     # Save and/or close the data sources
     inp_nc.close()
