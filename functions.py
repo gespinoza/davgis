@@ -142,18 +142,41 @@ def Raster_to_Array(input_tiff, ll_corner, x_ncells, y_ncells,
     # Array
     ll_x = ll_corner[0]  # max(ll_corner[0], top_left_x)
     ll_y = ll_corner[1]  # min(ll_corner[1], top_left_y + cellsize_y*y_tot_n)
-    x_off = int(math.floor((ll_x - top_left_x) / cellsize_x))
-    y_off = int(math.ceil((ll_y - top_left_y)/cellsize_y - y_ncells))
+    x_off = int(math.floor(
+                    (ll_x - top_left_x) / cellsize_x) + 1)
+    y_off = -int(math.ceil(
+                    (top_left_y - (ll_y - cellsize_y*y_ncells))/cellsize_y))
 
     d_type = pd.np.dtype(values_type)
 
-    array = inp_lyr.ReadAsArray(max(0, x_off), max(0, y_off),
-                                min(x_tot_n,
-                                    x_tot_n - x_off,
-                                    x_ncells + x_off),
-                                min(y_tot_n,
-                                    y_tot_n - y_off,
-                                    y_ncells + y_off)).astype(d_type)
+    # Array parameters
+    if x_off < 0:
+        x1 = 0
+        if x_ncells + x_off < x_tot_n:
+            x2 = x_ncells + x_off
+        else:
+            x2 = x_tot_n
+    else:
+        x1 = x_off
+        if x_ncells + x_off < x_tot_n:
+            x2 = x_ncells
+        else:
+            x2 = x_tot_n - x_off
+    if y_off < 0:
+        y1 = 0
+        if y_ncells + y_off < y_tot_n:
+            y2 = y_ncells + y_off
+        else:
+            y2 = y_tot_n
+    else:
+        y1 = y_off
+        if y_ncells + y_off < y_tot_n:
+            y2 = y_ncells
+        else:
+            y2 = y_tot_n - y_off
+
+    # Read array
+    array = inp_lyr.ReadAsArray(x1, y1, x2, y2).astype(d_type)
     array[pd.np.isclose(array, NoData_value)] = pd.np.nan
 
     # Add cols/rows if requesting an array larger than the extent of the raster
@@ -270,7 +293,7 @@ def Array_to_Raster(array, output_tiff, ll_corner, cellsize,
 
     out_source.SetGeoTransform((out_top_left_x, cellsize, 0,
                                 out_top_left_y, 0, -cellsize))
-    out_source.SetProjection(srs_wkt)
+    out_source.SetProjection(str(srs_wkt))
     out_band.WriteArray(array)
 
     # Save and/or close the data sources
