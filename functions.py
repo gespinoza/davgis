@@ -143,7 +143,7 @@ def Raster_to_Array(input_tiff, ll_corner, x_ncells, y_ncells,
     ll_x = ll_corner[0]  # max(ll_corner[0], top_left_x)
     ll_y = ll_corner[1]  # min(ll_corner[1], top_left_y + cellsize_y*y_tot_n)
     x_off = int(math.floor(
-                    (ll_x - top_left_x) / cellsize_x) + 1)
+                    (ll_x - top_left_x) / cellsize_x))
     y_off = -int(math.ceil(
                     (top_left_y - (ll_y - cellsize_y*y_ncells))/cellsize_y))
 
