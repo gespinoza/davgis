@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Authors: Gonzalo E. Espinoza
-Contact: gespinoza@utexas.edu
+Authors: Gonzalo E. Espinoza-Dávalos
+Contact: g.espinoza@un-ihe.org, gespinoza@utexas.edu
 Repository: https://github.com/gespinoza/davgis
 Module: davgis
 
