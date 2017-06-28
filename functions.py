@@ -1,3 +1,15 @@
+# -*- coding: utf-8 -*-
+"""
+Authors: Gonzalo E. Espinoza-Dávalos
+Contact: g.espinoza@un-ihe.org, gespinoza@utexas.edu
+Repository: https://github.com/gespinoza/davgis
+Module: davgis
+
+Description:
+This module is a python wrapper to simplify scripting and automation of common
+GIS workflows used in water resources.
+"""
+
 from __future__ import division
 import os
 import ogr
