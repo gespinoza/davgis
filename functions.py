@@ -184,7 +184,6 @@ def Raster_to_Array(input_tiff, ll_corner, x_ncells, y_ncells,
     temp_source.SetProjection(inp_srs)
 
     # Snap
-    print temp_tiff
     gdal.ReprojectImage(inp_lyr, temp_source, inp_srs, inp_srs,
                         gdal.GRA_Bilinear)
     temp_source = None
